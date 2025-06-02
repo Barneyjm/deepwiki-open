@@ -31,8 +31,17 @@ OPENAI_API_KEY=your_openai_api_key        # Required for embeddings and OpenAI m
 # Optional API Keys
 OPENROUTER_API_KEY=your_openrouter_api_key  # Required only if using OpenRouter models
 
+# AWS Bedrock Configuration
+AWS_ACCESS_KEY_ID=your_aws_access_key_id      # Required for AWS Bedrock models
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key     # Required for AWS Bedrock models
+AWS_REGION=us-east-1                          # Optional, defaults to us-east-1
+AWS_ROLE_ARN=your_aws_role_arn                # Optional, for role-based authentication
+
 # OpenAI API Configuration
-OPENAI_API_BASE=https://custom-api-endpoint.com/v1  # Optional, for custom OpenAI API endpoints
+OPENAI_BASE_URL=https://custom-api-endpoint.com/v1  # Optional, for custom OpenAI API endpoints
+
+# Ollama host
+OLLAMA_HOST=https://your_ollama_host"  # Optional: Add Ollama host if not local. default: http://localhost:11434
 
 # Server Configuration
 PORT=8001  # Optional, defaults to 8001
@@ -44,6 +53,7 @@ If you're not using Ollama mode, you need to configure an OpenAI API key for emb
 > - Get a Google API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
 > - Get an OpenAI API key from [OpenAI Platform](https://platform.openai.com/api-keys)
 > - Get an OpenRouter API key from [OpenRouter](https://openrouter.ai/keys)
+> - Get AWS credentials from [AWS IAM Console](https://console.aws.amazon.com/iam/)
 
 #### Advanced Environment Configuration
 
@@ -53,10 +63,11 @@ DeepWiki supports multiple LLM providers. The environment variables above are re
 - **Google Gemini**: Requires `GOOGLE_API_KEY`
 - **OpenAI**: Requires `OPENAI_API_KEY`
 - **OpenRouter**: Requires `OPENROUTER_API_KEY`
+- **AWS Bedrock**: Requires `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
 - **Ollama**: No API key required (runs locally)
 
 ##### Custom OpenAI API Endpoints
-The `OPENAI_API_BASE` variable allows you to specify a custom endpoint for the OpenAI API. This is useful for:
+The `OPENAI_BASE_URL` variable allows you to specify a custom endpoint for the OpenAI API. This is useful for:
 
 - Enterprise users with private API channels
 - Organizations using self-hosted or custom-deployed LLM services
@@ -64,7 +75,7 @@ The `OPENAI_API_BASE` variable allows you to specify a custom endpoint for the O
 
 **Example:** you can use the endpoint which support the OpenAI protocol provided by any organization
 ```
-OPENAI_API_BASE=https://custom-openai-endpoint.com/v1
+OPENAI_BASE_URL=https://custom-openai-endpoint.com/v1
 ```
 
 ##### Configuration Files
@@ -72,7 +83,7 @@ DeepWiki now uses JSON configuration files to manage various system components i
 
 1. **`generator.json`**: Configuration for text generation models
    - Located in `api/config/` by default
-   - Defines available model providers (Google, OpenAI, OpenRouter, Ollama)
+   - Defines available model providers (Google, OpenAI, OpenRouter, AWS Bedrock, Ollama)
    - Specifies default and available models for each provider
    - Contains model-specific parameters like temperature and top_p
 
@@ -83,7 +94,7 @@ DeepWiki now uses JSON configuration files to manage various system components i
    - Specifies text splitter settings for document chunking
 
 3. **`repo.json`**: Configuration for repository handling
-   - Located in `api/config/` by default 
+   - Located in `api/config/` by default
    - Contains file filters to exclude certain files and directories
    - Defines repository size limits and processing rules
 

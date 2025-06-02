@@ -2083,6 +2083,7 @@ IMPORTANT:
         excludedFiles={modelExcludedFiles}
         setExcludedFiles={setModelExcludedFiles}
         onApply={confirmRefresh}
+        showWikiType={true}
       />
     </div>
   );

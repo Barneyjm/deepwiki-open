@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 from api.openai_client import OpenAIClient
 from api.openrouter_client import OpenRouterClient
 from api.azure_openai_client import AzureOpenAIClient
+from api.bedrock_client import BedrockClient
 from adalflow import GoogleGenAIClient, OllamaClient
 
 # Get API keys from environment variables
@@ -17,6 +18,10 @@ GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
 AZURE_OPENAI_API_KEY = os.environ.get('AZURE_OPENAI_API_KEY')
 AZURE_OPENAI_ENDPOINT = os.environ.get('AZURE_OPENAI_ENDPOINT') or os.environ.get('AZURE_OPENAI_API_BASE')
+AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+AWS_REGION = os.environ.get('AWS_REGION')
+AWS_ROLE_ARN = os.environ.get('AWS_ROLE_ARN')
 
 # Set keys in environment (in case they're needed elsewhere in the code)
 if OPENAI_API_KEY:
@@ -33,6 +38,14 @@ if AZURE_OPENAI_ENDPOINT:
     os.environ["AZURE_OPENAI_ENDPOINT"] = AZURE_OPENAI_ENDPOINT
     # Also set the old variable for backward compatibility
     os.environ["AZURE_OPENAI_API_BASE"] = AZURE_OPENAI_ENDPOINT
+if AWS_ACCESS_KEY_ID:
+    os.environ["AWS_ACCESS_KEY_ID"] = AWS_ACCESS_KEY_ID
+if AWS_SECRET_ACCESS_KEY:
+    os.environ["AWS_SECRET_ACCESS_KEY"] = AWS_SECRET_ACCESS_KEY
+if AWS_REGION:
+    os.environ["AWS_REGION"] = AWS_REGION
+if AWS_ROLE_ARN:
+    os.environ["AWS_ROLE_ARN"] = AWS_ROLE_ARN
 
 # Get configuration directory from environment variable, or use default if not set
 CONFIG_DIR = os.environ.get('DEEPWIKI_CONFIG_DIR', None)
@@ -43,7 +56,8 @@ CLIENT_CLASSES = {
     "OpenAIClient": OpenAIClient,
     "OpenRouterClient": OpenRouterClient,
     "OllamaClient": OllamaClient,
-    "AzureOpenAIClient": AzureOpenAIClient
+    "AzureOpenAIClient": AzureOpenAIClient,
+    "BedrockClient": BedrockClient
 }
 
 # Load JSON configuration file
@@ -79,12 +93,13 @@ def load_generator_config():
             if provider_config.get("client_class") in CLIENT_CLASSES:
                 provider_config["model_client"] = CLIENT_CLASSES[provider_config["client_class"]]
             # Fall back to default mapping based on provider_id
-            elif provider_id in ["google", "openai", "openrouter", "ollama"]:
+            elif provider_id in ["google", "openai", "openrouter", "ollama", "bedrock"]:
                 default_map = {
                     "google": GoogleGenAIClient,
                     "openai": OpenAIClient,
                     "openrouter": OpenRouterClient,
-                    "ollama": OllamaClient
+                    "ollama": OllamaClient,
+                    "bedrock": BedrockClient
                 }
                 provider_config["model_client"] = default_map[provider_id]
             else:
@@ -104,6 +119,35 @@ def load_embedder_config():
                 embedder_config[key]["model_client"] = CLIENT_CLASSES[class_name]
 
     return embedder_config
+
+def get_embedder_config():
+    """
+    Get the current embedder configuration.
+
+    Returns:
+        dict: The embedder configuration with model_client resolved
+    """
+    return configs.get("embedder", {})
+
+def is_ollama_embedder():
+    """
+    Check if the current embedder configuration uses OllamaClient.
+
+    Returns:
+        bool: True if using OllamaClient, False otherwise
+    """
+    embedder_config = get_embedder_config()
+    if not embedder_config:
+        return False
+
+    # Check if model_client is OllamaClient
+    model_client = embedder_config.get("model_client")
+    if model_client:
+        return model_client.__name__ == "OllamaClient"
+
+    # Fallback: check client_class string
+    client_class = embedder_config.get("client_class", "")
+    return client_class == "OllamaClient"
 
 # Load repository and file filters configuration
 def load_repo_config():
@@ -180,7 +224,7 @@ def get_model_config(provider="google", model=None):
     Get configuration for the specified provider and model
 
     Parameters:
-        provider (str): Model provider ('google', 'openai', 'openrouter', 'ollama')
+        provider (str): Model provider ('google', 'openai', 'openrouter', 'ollama', 'bedrock')
         model (str): Model name, or None to use default model
 
     Returns:

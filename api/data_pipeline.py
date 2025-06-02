@@ -70,19 +70,25 @@ def get_file_attributes(file_path: str) -> Dict[str, Any]:
 # Maximum token limit for OpenAI embedding models
 MAX_EMBEDDING_TOKENS = 8192
 
-def count_tokens(text: str, local_ollama: bool = False) -> int:
+def count_tokens(text: str, is_ollama_embedder: bool = None) -> int:
     """
     Count the number of tokens in a text string using tiktoken.
 
     Args:
         text (str): The text to count tokens for.
-        local_ollama (bool, optional): Whether using local Ollama embeddings. Default is False.
+        is_ollama_embedder (bool, optional): Whether using Ollama embeddings.
+                                           If None, will be determined from configuration.
 
     Returns:
         int: The number of tokens in the text.
     """
     try:
-        if local_ollama:
+        # Determine if using Ollama embedder if not specified
+        if is_ollama_embedder is None:
+            from api.config import is_ollama_embedder as check_ollama
+            is_ollama_embedder = check_ollama()
+
+        if is_ollama_embedder:
             encoding = tiktoken.get_encoding("cl100k_base")
         else:
             encoding = tiktoken.encoding_for_model("text-embedding-3-small")
@@ -182,14 +188,15 @@ def download_repo(repo_url: str, type: str = "github", access_token: str = None)
 # Alias for backward compatibility
 download_github_repo = download_repo
 
-def read_all_documents(path: str, local_ollama: bool = False, excluded_dirs: List[str] = None, excluded_files: List[str] = None,
+def read_all_documents(path: str, is_ollama_embedder: bool = None, excluded_dirs: List[str] = None, excluded_files: List[str] = None,
                       included_dirs: List[str] = None, included_files: List[str] = None):
     """
     Recursively reads all documents in a directory and its subdirectories.
 
     Args:
         path (str): The root directory path.
-        local_ollama (bool): Whether to use local Ollama for token counting. Default is False.
+        is_ollama_embedder (bool, optional): Whether using Ollama embeddings for token counting.
+                                           If None, will be determined from configuration.
         excluded_dirs (List[str], optional): List of directories to exclude from processing.
             Overrides the default configuration if provided.
         excluded_files (List[str], optional): List of file patterns to exclude from processing.
@@ -204,8 +211,8 @@ def read_all_documents(path: str, local_ollama: bool = False, excluded_dirs: Lis
     """
     documents = []
     # File extensions to look for, prioritizing code files
-    code_extensions = [".py", ".js", ".ts", ".java", ".cpp", ".c", ".go", ".rs",
-                       ".jsx", ".tsx", ".html", ".css", ".php", ".swift", ".cs", ".tf", ".tfvars"]
+    code_extensions = [".py", ".js", ".ts", ".java", ".cpp", ".c", ".h", ".hpp", ".go", ".rs",
+                       ".jsx", ".tsx", ".html", ".css", ".php", ".swift", ".cs"]
     doc_extensions = [".md", ".txt", ".rst", ".json", ".yaml", ".yml"]
 
     # Determine filtering mode: inclusion or exclusion
@@ -347,7 +354,7 @@ def read_all_documents(path: str, local_ollama: bool = False, excluded_dirs: Lis
                     )
 
                     # Check token count
-                    token_count = count_tokens(content, local_ollama)
+                    token_count = count_tokens(content, is_ollama_embedder)
                     if token_count > MAX_EMBEDDING_TOKENS * 10:
                         logger.warning(f"Skipping large file {relative_path}: Token count ({token_count}) exceeds limit")
                         continue
@@ -392,7 +399,7 @@ def read_all_documents(path: str, local_ollama: bool = False, excluded_dirs: Lis
                     relative_path = os.path.relpath(file_path, path)
 
                     # Check token count
-                    token_count = count_tokens(content, local_ollama)
+                    token_count = count_tokens(content, is_ollama_embedder)
                     if token_count > MAX_EMBEDDING_TOKENS:
                         logger.warning(f"Skipping large file {relative_path}: Token count ({token_count}) exceeds limit")
                         continue
@@ -426,33 +433,43 @@ def read_all_documents(path: str, local_ollama: bool = False, excluded_dirs: Lis
     logger.info(f"Found {len(documents)} documents")
     return documents
 
-def prepare_data_pipeline(local_ollama: bool = False):
+def prepare_data_pipeline(is_ollama_embedder: bool = None):
     """
     Creates and returns the data transformation pipeline.
 
     Args:
-        local_ollama (bool): Whether to use local Ollama for embedding (default: False)
+        is_ollama_embedder (bool, optional): Whether to use Ollama for embedding.
+                                           If None, will be determined from configuration.
 
     Returns:
         adal.Sequential: The data transformation pipeline
     """
-    splitter = TextSplitter(**configs["text_splitter"])
+    from api.config import get_embedder_config, is_ollama_embedder as check_ollama
 
-    if local_ollama:
-        # Use Ollama embedder
-        embedder = adal.Embedder(
-            model_client=configs["embedder_ollama"]["model_client"](),
-            model_kwargs=configs["embedder_ollama"]["model_kwargs"],
-        )
+    # Determine if using Ollama embedder if not specified
+    if is_ollama_embedder is None:
+        is_ollama_embedder = check_ollama()
+
+    splitter = TextSplitter(**configs["text_splitter"])
+    embedder_config = get_embedder_config()
+
+    if not embedder_config:
+        raise ValueError("No embedder configuration found")
+
+    # Create embedder based on configuration
+    embedder = adal.Embedder(
+        model_client=embedder_config["model_client"](),
+        model_kwargs=embedder_config["model_kwargs"],
+    )
+
+    if is_ollama_embedder:
+        # Use Ollama document processor for single-document processing
         embedder_transformer = OllamaDocumentProcessor(embedder=embedder)
     else:
-        # Use OpenAI embedder
-        embedder = adal.Embedder(
-            model_client=configs["embedder"]["model_client"](),
-            model_kwargs=configs["embedder"]["model_kwargs"],
-        )
+        # Use batch processing for other embedders
+        batch_size = embedder_config.get("batch_size", 500)
         embedder_transformer = ToEmbeddings(
-            embedder=embedder, batch_size=configs["embedder"]["batch_size"]
+            embedder=embedder, batch_size=batch_size
         )
 
     data_transformer = adal.Sequential(
@@ -461,7 +478,7 @@ def prepare_data_pipeline(local_ollama: bool = False):
     return data_transformer
 
 def transform_documents_and_save_to_db(
-    documents: List[Document], db_path: str, local_ollama: bool = False
+    documents: List[Document], db_path: str, is_ollama_embedder: bool = None
 ) -> LocalDB:
     """
     Transforms a list of documents and saves them to a local database.
@@ -469,10 +486,11 @@ def transform_documents_and_save_to_db(
     Args:
         documents (list): A list of `Document` objects.
         db_path (str): The path to the local database file.
-        local_ollama (bool): Whether to use local Ollama for embedding (default: False)
+        is_ollama_embedder (bool, optional): Whether to use Ollama for embedding.
+                                           If None, will be determined from configuration.
     """
     # Get the data transformer
-    data_transformer = prepare_data_pipeline(local_ollama)
+    data_transformer = prepare_data_pipeline(is_ollama_embedder)
 
     # Save the documents to a local database
     db = LocalDB()
@@ -774,7 +792,7 @@ class DatabaseManager:
         self.repo_url_or_path = None
         self.repo_paths = None
 
-    def prepare_database(self, repo_url_or_path: str, type: str = "github", access_token: str = None, local_ollama: bool = False,
+    def prepare_database(self, repo_url_or_path: str, type: str = "github", access_token: str = None, is_ollama_embedder: bool = None,
                        excluded_dirs: List[str] = None, excluded_files: List[str] = None,
                        included_dirs: List[str] = None, included_files: List[str] = None) -> List[Document]:
         """
@@ -783,7 +801,8 @@ class DatabaseManager:
         Args:
             repo_url_or_path (str): The URL or local path of the repository
             access_token (str, optional): Access token for private repositories
-            local_ollama (bool): Whether to use local Ollama for embedding (default: False)
+            is_ollama_embedder (bool, optional): Whether to use Ollama for embedding.
+                                               If None, will be determined from configuration.
             excluded_dirs (List[str], optional): List of directories to exclude from processing
             excluded_files (List[str], optional): List of file patterns to exclude from processing
             included_dirs (List[str], optional): List of directories to include exclusively
@@ -794,7 +813,7 @@ class DatabaseManager:
         """
         self.reset_database()
         self._create_repo(repo_url_or_path, type, access_token)
-        return self.prepare_db_index(local_ollama=local_ollama, excluded_dirs=excluded_dirs, excluded_files=excluded_files,
+        return self.prepare_db_index(is_ollama_embedder=is_ollama_embedder, excluded_dirs=excluded_dirs, excluded_files=excluded_files,
                                    included_dirs=included_dirs, included_files=included_files)
 
     def reset_database(self):
@@ -895,13 +914,14 @@ class DatabaseManager:
             logger.error(f"Failed to create repository structure: {e}")
             raise
 
-    def prepare_db_index(self, local_ollama: bool = False, excluded_dirs: List[str] = None, excluded_files: List[str] = None,
+    def prepare_db_index(self, is_ollama_embedder: bool = None, excluded_dirs: List[str] = None, excluded_files: List[str] = None,
                         included_dirs: List[str] = None, included_files: List[str] = None) -> List[Document]:
         """
         Prepare the indexed database for the repository.
 
         Args:
-            local_ollama (bool): Whether to use local Ollama for embedding (default: False)
+            is_ollama_embedder (bool, optional): Whether to use Ollama for embedding.
+                                               If None, will be determined from configuration.
             excluded_dirs (List[str], optional): List of directories to exclude from processing
             excluded_files (List[str], optional): List of file patterns to exclude from processing
             included_dirs (List[str], optional): List of directories to include exclusively
@@ -927,14 +947,14 @@ class DatabaseManager:
         logger.info("Creating new database...")
         documents = read_all_documents(
             self.repo_paths["save_repo_dir"],
-            local_ollama=local_ollama,
+            is_ollama_embedder=is_ollama_embedder,
             excluded_dirs=excluded_dirs,
             excluded_files=excluded_files,
             included_dirs=included_dirs,
             included_files=included_files
         )
         self.db = transform_documents_and_save_to_db(
-            documents, self.repo_paths["save_db_file"], local_ollama=local_ollama
+            documents, self.repo_paths["save_db_file"], is_ollama_embedder=is_ollama_embedder
         )
         logger.info(f"Total documents: {len(documents)}")
         transformed_docs = self.db.get_transformed_data(key="split_and_embed")
