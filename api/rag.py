@@ -420,13 +420,19 @@ IMPORTANT FORMATTING RULES:
 
         try:
             retreive_embedder = self.query_embedder if self.local_ollama else self.embedder
+            
+            # Extract top_k from config to handle it separately
+            retriever_config = configs["retriever"].copy()
+            top_k = retriever_config.pop("top_k", 20)  # Default to 20 if not specified
+            
+            # Initialize the retriever with the correct parameters
             self.retriever = FAISSRetriever(
-                **configs["retriever"],
                 embedder=retreive_embedder,
                 documents=self.transformed_docs,
                 document_map_func=lambda doc: doc.vector,
+                top_k=top_k  # Pass top_k as a direct parameter
             )
-            logger.info("FAISS retriever created successfully")
+            logger.info(f"FAISS retriever created successfully with top_k={top_k}")
         except Exception as e:
             logger.error(f"Error creating FAISS retriever: {str(e)}")
             # Try to provide more specific error information
@@ -462,13 +468,34 @@ IMPORTANT FORMATTING RULES:
             Tuple of (RAGAnswer, retrieved_documents)
         """
         try:
+            # Add debug logging
+            logger.info(f"Calling retriever with query: {query[:50]}...")
+            logger.info(f"Retriever type: {type(self.retriever).__name__}")
+            
+            # Call the retriever
             retrieved_documents = self.retriever(query)
-
-            # Fill in the documents
-            retrieved_documents[0].documents = [
-                self.transformed_docs[doc_index]
-                for doc_index in retrieved_documents[0].doc_indices
-            ]
+            logger.info(f"Retrieved documents type: {type(retrieved_documents)}")
+            
+            if isinstance(retrieved_documents, list) and len(retrieved_documents) > 0:
+                logger.info(f"First result type: {type(retrieved_documents[0]).__name__}")
+                logger.info(f"Doc indices available: {hasattr(retrieved_documents[0], 'doc_indices')}")
+                
+                # Fill in the documents
+                if hasattr(retrieved_documents[0], 'doc_indices'):
+                    retrieved_documents[0].documents = [
+                        self.transformed_docs[doc_index]
+                        for doc_index in retrieved_documents[0].doc_indices
+                    ]
+                else:
+                    logger.error("Retrieved documents don't have doc_indices attribute")
+                    # Try to handle this case gracefully
+                    if hasattr(retrieved_documents[0], 'documents') and not retrieved_documents[0].documents:
+                        # If documents is empty, try to populate it with the top documents
+                        top_k = getattr(self.retriever, 'top_k', 20)  # Default to 20 if not specified
+                        retrieved_documents[0].documents = self.transformed_docs[:top_k]
+                        logger.info(f"Populated documents with top {top_k} documents as fallback")
+            else:
+                logger.error(f"Unexpected retriever result format: {retrieved_documents}")
 
             return retrieved_documents
 

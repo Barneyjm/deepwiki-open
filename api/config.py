@@ -8,12 +8,15 @@ logger = logging.getLogger(__name__)
 
 from api.openai_client import OpenAIClient
 from api.openrouter_client import OpenRouterClient
+from api.azure_openai_client import AzureOpenAIClient
 from adalflow import GoogleGenAIClient, OllamaClient
 
 # Get API keys from environment variables
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY')
+AZURE_OPENAI_API_KEY = os.environ.get('AZURE_OPENAI_API_KEY')
+AZURE_OPENAI_ENDPOINT = os.environ.get('AZURE_OPENAI_ENDPOINT') or os.environ.get('AZURE_OPENAI_API_BASE')
 
 # Set keys in environment (in case they're needed elsewhere in the code)
 if OPENAI_API_KEY:
@@ -22,6 +25,14 @@ if GOOGLE_API_KEY:
     os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 if OPENROUTER_API_KEY:
     os.environ["OPENROUTER_API_KEY"] = OPENROUTER_API_KEY
+if AZURE_OPENAI_API_KEY:
+    os.environ["AZURE_OPENAI_API_KEY"] = AZURE_OPENAI_API_KEY
+
+# Support both old and new Azure OpenAI endpoint environment variables
+if AZURE_OPENAI_ENDPOINT:
+    os.environ["AZURE_OPENAI_ENDPOINT"] = AZURE_OPENAI_ENDPOINT
+    # Also set the old variable for backward compatibility
+    os.environ["AZURE_OPENAI_API_BASE"] = AZURE_OPENAI_ENDPOINT
 
 # Get configuration directory from environment variable, or use default if not set
 CONFIG_DIR = os.environ.get('DEEPWIKI_CONFIG_DIR', None)
@@ -31,7 +42,8 @@ CLIENT_CLASSES = {
     "GoogleGenAIClient": GoogleGenAIClient,
     "OpenAIClient": OpenAIClient,
     "OpenRouterClient": OpenRouterClient,
-    "OllamaClient": OllamaClient
+    "OllamaClient": OllamaClient,
+    "AzureOpenAIClient": AzureOpenAIClient
 }
 
 # Load JSON configuration file
@@ -212,6 +224,14 @@ def get_model_config(provider="google", model=None):
             result["model_kwargs"] = {"model": model, **model_params["options"]}
         else:
             result["model_kwargs"] = {"model": model}
+    elif provider == "azure":
+        # Azure OpenAI uses deployment_id instead of model
+        # The model name is used as the deployment_id
+        result["model_kwargs"] = {"model": model, **model_params}
+        
+        # Pass model-specific API versions if available
+        if "model_api_versions" in provider_config:
+            result["model_client_kwargs"] = {"model_api_versions": provider_config["model_api_versions"]}
     else:
         # Standard structure for other providers
         result["model_kwargs"] = {"model": model, **model_params}

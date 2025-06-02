@@ -3,7 +3,7 @@ import os
 from typing import List, Optional, Dict, Any
 from urllib.parse import unquote
 
-import google.generativeai as genai
+# Import model clients
 from adalflow.components.model_client.ollama_client import OllamaClient
 from adalflow.core.types import ModelType
 from fastapi import WebSocket, WebSocketDisconnect, HTTPException
@@ -13,7 +13,15 @@ from api.config import get_model_config
 from api.data_pipeline import count_tokens, get_file_content
 from api.openai_client import OpenAIClient
 from api.openrouter_client import OpenRouterClient
+from api.azure_openai_client import AzureOpenAIClient
 from api.rag import RAG
+
+# Optional import for Google Generative AI
+try:
+    import google.generativeai as genai
+    GOOGLE_AI_AVAILABLE = True
+except ImportError:
+    GOOGLE_AI_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(
@@ -24,9 +32,14 @@ logger = logging.getLogger(__name__)
 
 # Get API keys from environment variables
 google_api_key = os.environ.get('GOOGLE_API_KEY')
+azure_openai_api_key = os.environ.get('AZURE_OPENAI_API_KEY')
+azure_openai_endpoint = os.environ.get('AZURE_OPENAI_ENDPOINT') or os.environ.get('AZURE_OPENAI_API_BASE')
 
-# Configure Google Generative AI
-if google_api_key:
+# Check if Azure OpenAI is configured
+AZURE_OPENAI_AVAILABLE = bool(azure_openai_api_key and azure_openai_endpoint)
+
+# Configure Google Generative AI if available
+if GOOGLE_AI_AVAILABLE and google_api_key:
     genai.configure(api_key=google_api_key)
 else:
     logger.warning("GOOGLE_API_KEY not found in environment variables")
@@ -47,7 +60,7 @@ class ChatCompletionRequest(BaseModel):
     type: Optional[str] = Field("github", description="Type of repository (e.g., 'github', 'gitlab', 'bitbucket')")
 
     # model parameters
-    provider: str = Field("google", description="Model provider (google, openai, openrouter, ollama)")
+    provider: str = Field("azure", description="Model provider (azure, openai, openrouter, ollama, google)")
     model: Optional[str] = Field(None, description="Model name for the specified provider")
 
     language: Optional[str] = Field("en", description="Language for content generation (e.g., 'en', 'ja', 'zh', 'es', 'kr', 'vi')")
@@ -81,7 +94,13 @@ async def handle_websocket_chat(websocket: WebSocket):
 
         # Create a new RAG instance for this request
         try:
-            request_rag = RAG(provider=request.provider, model=request.model)
+            # Set a default provider if empty
+            provider = request.provider
+            if not provider or provider.strip() == "":
+                provider = "google"  # Default to google if provider is empty
+                logger.info(f"Empty provider detected, defaulting to: {provider}")
+            
+            request_rag = RAG(provider=provider, model=request.model)
 
             # Extract custom file filter parameters if provided
             excluded_dirs = None
@@ -201,9 +220,22 @@ async def handle_websocket_chat(websocket: WebSocket):
                 # Try to perform RAG retrieval
                 try:
                     # This will use the actual RAG implementation
+                    logger.info("About to call request_rag with query")
                     retrieved_documents = request_rag(rag_query, language=request.language)
-
-                    if retrieved_documents and retrieved_documents[0].documents:
+                    logger.info(f"RAG call successful, result type: {type(retrieved_documents)}")
+                    
+                    # Debug the retrieved documents structure
+                    if isinstance(retrieved_documents, tuple):
+                        logger.info(f"Retrieved documents is a tuple of length {len(retrieved_documents)}")
+                        for i, item in enumerate(retrieved_documents):
+                            logger.info(f"Item {i} type: {type(item).__name__}")
+                    elif isinstance(retrieved_documents, list):
+                        logger.info(f"Retrieved documents is a list of length {len(retrieved_documents)}")
+                        for i, item in enumerate(retrieved_documents):
+                            logger.info(f"Item {i} type: {type(item).__name__}")
+                    
+                    # Check if we have documents
+                    if retrieved_documents and hasattr(retrieved_documents[0], 'documents'):
                         # Format context for the prompt in a more structured way
                         documents = retrieved_documents[0].documents
                         logger.info(f"Retrieved {len(documents)} documents")
@@ -266,25 +298,25 @@ async def handle_websocket_chat(websocket: WebSocket):
 
             if is_first_iteration:
                 system_prompt = f"""<role>
-You are an expert code analyst examining the {repo_type} repository: {repo_url} ({repo_name}).
-You are conducting a multi-turn Deep Research process to thoroughly investigate the specific topic in the user's query.
-Your goal is to provide detailed, focused information EXCLUSIVELY about this topic.
-IMPORTANT:You MUST respond in {language_name} language.
+You are an expert RFP (Request for Proposal) analyst specializing in insurance company documentation. You're examining the repository: {repo_url} ({repo_name}).
+You are conducting a multi-turn Deep Research process to thoroughly investigate the specific RFP topic in the user's query.
+Your goal is to provide detailed, focused information EXCLUSIVELY about this insurance RFP topic to help onboard new RFP experts and provide clear documentation for AI RFP answerers.
+IMPORTANT: You MUST respond in {language_name} language.
 </role>
 
 <guidelines>
 - This is the first iteration of a multi-turn research process focused EXCLUSIVELY on the user's query
 - Start your response with "## Research Plan"
-- Outline your approach to investigating this specific topic
-- If the topic is about a specific file or feature (like "Dockerfile"), focus ONLY on that file or feature
-- Clearly state the specific topic you're researching to maintain focus throughout all iterations
-- Identify the key aspects you'll need to research
-- Provide initial findings based on the information available
+- Outline your approach to investigating this specific insurance RFP topic
+- If the topic is about a specific insurance product or line of business (like "Vision PPO"), focus ONLY on that product or line
+- Clearly state the specific RFP topic you're researching to maintain focus throughout all iterations
+- Identify the key aspects you'll need to research (e.g., coverage details, network information, pricing structures, etc.)
+- Provide initial findings based on the information available in the RFP documentation
 - End with "## Next Steps" indicating what you'll investigate in the next iteration
 - Do NOT provide a final conclusion yet - this is just the beginning of the research
-- Do NOT include general repository information unless directly relevant to the query
-- Focus EXCLUSIVELY on the specific topic being researched - do not drift to related topics
-- Your research MUST directly address the original question
+- Do NOT include general repository information unless directly relevant to the RFP query
+- Focus EXCLUSIVELY on the specific insurance RFP topic being researched - do not drift to related topics
+- Your research MUST directly address the original question about insurance RFP documentation
 - NEVER respond with just "Continue the research" as an answer - always provide substantive research findings
 - Remember that this topic will be maintained across all research iterations
 </guidelines>
@@ -292,14 +324,15 @@ IMPORTANT:You MUST respond in {language_name} language.
 <style>
 - Be concise but thorough
 - Use markdown formatting to improve readability
-- Cite specific files and code sections when relevant
+- Cite specific RFP documents and sections when relevant
+- Use insurance industry terminology appropriately
 </style>"""
             elif is_final_iteration:
                 system_prompt = f"""<role>
-You are an expert code analyst examining the {repo_type} repository: {repo_url} ({repo_name}).
-You are in the final iteration of a Deep Research process focused EXCLUSIVELY on the latest user query.
-Your goal is to synthesize all previous findings and provide a comprehensive conclusion that directly addresses this specific topic and ONLY this topic.
-IMPORTANT:You MUST respond in {language_name} language.
+You are an expert RFP (Request for Proposal) analyst specializing in insurance company documentation. You're examining the repository: {repo_url} ({repo_name}).
+You are in the final iteration of a Deep Research process focused EXCLUSIVELY on the latest user query about insurance RFP documentation.
+Your goal is to synthesize all previous findings and provide a comprehensive conclusion that directly addresses this specific insurance RFP topic and ONLY this topic, helping onboard new RFP experts and providing clear documentation for AI RFP answerers.
+IMPORTANT: You MUST respond in {language_name} language.
 </role>
 
 <guidelines>
@@ -307,67 +340,71 @@ IMPORTANT:You MUST respond in {language_name} language.
 - CAREFULLY review the entire conversation history to understand all previous findings
 - Synthesize ALL findings from previous iterations into a comprehensive conclusion
 - Start with "## Final Conclusion"
-- Your conclusion MUST directly address the original question
-- Stay STRICTLY focused on the specific topic - do not drift to related topics
-- Include specific code references and implementation details related to the topic
-- Highlight the most important discoveries and insights about this specific functionality
+- Your conclusion MUST directly address the original question about insurance RFP documentation
+- Stay STRICTLY focused on the specific insurance RFP topic - do not drift to related topics
+- Include specific RFP document references and important details related to the topic
+- Highlight the most important discoveries and insights about this specific insurance product or line of business
 - Provide a complete and definitive answer to the original question
-- Do NOT include general repository information unless directly relevant to the query
-- Focus exclusively on the specific topic being researched
+- Do NOT include general repository information unless directly relevant to the RFP query
+- Focus exclusively on the specific insurance RFP topic being researched
 - NEVER respond with "Continue the research" as an answer - always provide a complete conclusion
-- If the topic is about a specific file or feature (like "Dockerfile"), focus ONLY on that file or feature
+- If the topic is about a specific insurance product or line of business (like "Vision PPO"), focus ONLY on that product or line
 - Ensure your conclusion builds on and references key findings from previous iterations
+- Include any relevant compliance or regulatory information if applicable
 </guidelines>
 
 <style>
 - Be concise but thorough
 - Use markdown formatting to improve readability
-- Cite specific files and code sections when relevant
+- Cite specific RFP documents and sections when relevant
 - Structure your response with clear headings
-- End with actionable insights or recommendations when appropriate
+- End with actionable insights or recommendations for RFP responders when appropriate
+- Use insurance industry terminology appropriately
 </style>"""
             else:
                 system_prompt = f"""<role>
-You are an expert code analyst examining the {repo_type} repository: {repo_url} ({repo_name}).
-You are currently in iteration {research_iteration} of a Deep Research process focused EXCLUSIVELY on the latest user query.
-Your goal is to build upon previous research iterations and go deeper into this specific topic without deviating from it.
-IMPORTANT:You MUST respond in {language_name} language.
+You are an expert RFP (Request for Proposal) analyst specializing in insurance company documentation. You're examining the repository: {repo_url} ({repo_name}).
+You are currently in iteration {research_iteration} of a Deep Research process focused EXCLUSIVELY on the latest user query about insurance RFP documentation.
+Your goal is to build upon previous research iterations and go deeper into this specific insurance RFP topic without deviating from it, helping onboard new RFP experts and providing clear documentation for AI RFP answerers.
+IMPORTANT: You MUST respond in {language_name} language.
 </role>
 
 <guidelines>
 - CAREFULLY review the conversation history to understand what has been researched so far
 - Your response MUST build on previous research iterations - do not repeat information already covered
-- Identify gaps or areas that need further exploration related to this specific topic
+- Identify gaps or areas that need further exploration related to this specific insurance RFP topic
 - Focus on one specific aspect that needs deeper investigation in this iteration
 - Start your response with "## Research Update {research_iteration}"
 - Clearly explain what you're investigating in this iteration
 - Provide new insights that weren't covered in previous iterations
 - If this is iteration 3, prepare for a final conclusion in the next iteration
-- Do NOT include general repository information unless directly relevant to the query
-- Focus EXCLUSIVELY on the specific topic being researched - do not drift to related topics
-- If the topic is about a specific file or feature (like "Dockerfile"), focus ONLY on that file or feature
+- Do NOT include general repository information unless directly relevant to the RFP query
+- Focus EXCLUSIVELY on the specific insurance RFP topic being researched - do not drift to related topics
+- If the topic is about a specific insurance product or line of business (like "Vision PPO"), focus ONLY on that product or line
 - NEVER respond with just "Continue the research" as an answer - always provide substantive research findings
-- Your research MUST directly address the original question
+- Your research MUST directly address the original question about insurance RFP documentation
 - Maintain continuity with previous research iterations - this is a continuous investigation
+- Consider any relevant compliance, regulatory, or competitive information if applicable
 </guidelines>
 
 <style>
 - Be concise but thorough
 - Focus on providing new information, not repeating what's already been covered
 - Use markdown formatting to improve readability
-- Cite specific files and code sections when relevant
+- Cite specific RFP documents and sections when relevant
+- Use insurance industry terminology appropriately
 </style>"""
         else:
             system_prompt = f"""<role>
-You are an expert code analyst examining the {repo_type} repository: {repo_url} ({repo_name}).
-You provide direct, concise, and accurate information about code repositories.
+You are an expert RFP (Request for Proposal) analyst specializing in insurance company documentation. You're examining the repository: {repo_url} ({repo_name}).
+You provide direct, concise, and accurate information about insurance RFP documentation to help onboard new RFP experts and provide clear documentation for AI RFP answerers.
 You NEVER start responses with markdown headers or code fences.
-IMPORTANT:You MUST respond in {language_name} language.
+IMPORTANT: You MUST respond in {language_name} language.
 </role>
 
 <guidelines>
 - Answer the user's question directly without ANY preamble or filler phrases
-- DO NOT include any rationale, explanation, or extra comments.
+- DO NOT include any rationale, explanation, or extra comments
 - DO NOT start with preambles like "Okay, here's a breakdown" or "Here's an explanation"
 - DO NOT start with markdown headers like "## Analysis of..." or any file path references
 - DO NOT start with ```markdown code fences
@@ -377,25 +414,27 @@ IMPORTANT:You MUST respond in {language_name} language.
 
 <example_of_what_not_to_do>
 ```markdown
-## Analysis of `adalflow/adalflow/datasets/gsm8k.py`
+## Analysis of Vision PPO Documentation
 
-This file contains...
+This document contains...
 ```
 </example_of_what_not_to_do>
 
-- Format your response with proper markdown including headings, lists, and code blocks WITHIN your answer
-- For code analysis, organize your response with clear sections
+- Format your response with proper markdown including headings, lists, and tables WITHIN your answer
+- For RFP analysis, organize your response with clear sections by product, coverage, or question type
 - Think step by step and structure your answer logically
 - Start with the most relevant information that directly addresses the user's query
-- Be precise and technical when discussing code
+- Be precise and use appropriate insurance industry terminology
+- Include relevant compliance or regulatory information when applicable
 - Your response language should be in the same language as the user's query
 </guidelines>
 
 <style>
 - Use concise, direct language
 - Prioritize accuracy over verbosity
-- When showing code, include line numbers and file paths when relevant
+- When referencing RFP documents, include document names and section references when relevant
 - Use markdown formatting to improve readability
+- Use insurance industry terminology appropriately
 </style>"""
 
         # Fetch file content if provided
@@ -479,6 +518,68 @@ This file contains...
                 model_kwargs=model_kwargs,
                 model_type=ModelType.LLM
             )
+        elif request.provider == "azure":
+            logger.info(f"Using Azure OpenAI protocol with model: {request.model}")
+
+            # Check if Azure OpenAI credentials are set
+            if not AZURE_OPENAI_AVAILABLE:
+                logger.warning("Azure OpenAI credentials not found in environment variables, but continuing with request")
+                # We'll handle this below by falling back to other providers
+
+            # Initialize Azure OpenAI client
+            model = AzureOpenAIClient()
+            
+            # Format the prompt as messages for Azure OpenAI
+            # First create the system message with context
+            system_content = system_prompt
+            
+            # Create the user message with the query
+            user_content = query
+            
+            # Format messages for Azure OpenAI
+            messages = [
+                {"role": "system", "content": system_content},
+            ]
+            
+            # Add conversation history if available
+            if conversation_history:
+                messages.append({"role": "user", "content": f"Previous conversation: {conversation_history}"})
+            
+            # Add context if available
+            if context_text.strip():
+                messages.append({"role": "user", "content": f"Context: {context_text}"})
+                
+            # Add file content if available
+            if request.filePath and file_content:
+                messages.append({"role": "user", "content": f"File content ({request.filePath}): {file_content}"})
+            
+            # Add the actual query
+            messages.append({"role": "user", "content": user_content})
+            
+            logger.info(f"Formatted {len(messages)} messages for Azure OpenAI")
+            
+            # Set up model kwargs
+            model_kwargs = {
+                "model": request.model or "gpt-4",  # Default to GPT-4 if not specified
+                "stream": True,
+                "temperature": model_config.get("temperature", 0.7),
+                "top_p": model_config.get("top_p", 0.8)
+            }
+
+            # For Azure OpenAI, we need to ensure the api_kwargs include both 'messages' and 'model'
+            # The convert_inputs_to_api_kwargs method may not be handling this correctly
+            api_kwargs = {
+                "messages": messages,
+                "model": request.model or "gpt-4",  # Ensure model is included
+                "stream": True,
+                "temperature": model_config.get("temperature", 0.7),
+                "top_p": model_config.get("top_p", 0.8)
+            }
+            
+            # Log the API kwargs for debugging
+            logger.info(f"Azure OpenAI API kwargs: {api_kwargs.keys()}")
+            
+            # No need to use convert_inputs_to_api_kwargs as we're manually constructing the kwargs
         elif request.provider == "openai":
             logger.info(f"Using Openai protocol with model: {request.model}")
 
@@ -502,19 +603,107 @@ This file contains...
                 model_type=ModelType.LLM
             )
         else:
-            # Initialize Google Generative AI model
-            model = genai.GenerativeModel(
-                model_name=model_config["model"],
-                generation_config={
-                    "temperature": model_config["temperature"],
-                    "top_p": model_config["top_p"],
-                    "top_k": model_config["top_k"]
+            # Fall back to Google Generative AI if available
+            if GOOGLE_AI_AVAILABLE and google_api_key:
+                # Initialize Google Generative AI model
+                logger.info("Using Google Generative AI for model generation")
+                # Create safe generation config with defaults
+                generation_config = {
+                    "temperature": 0.7,
+                    "top_p": 0.8,
+                    "top_k": 40
                 }
-            )
+                
+                # Update with available parameters from model_config
+                if "temperature" in model_config:
+                    generation_config["temperature"] = model_config["temperature"]
+                if "top_p" in model_config:
+                    generation_config["top_p"] = model_config["top_p"]
+                    
+                # Initialize the model with the safe configuration
+                model = genai.GenerativeModel(
+                    model_name=model_config["model"],
+                    generation_config=generation_config
+                )
+            else:
+                # Fall back to OpenAI if neither Azure nor Google is available
+                logger.info("Falling back to OpenAI for model generation")
+                model = OpenAIClient()
+                model_kwargs = {
+                    "model": request.model or "gpt-3.5-turbo",
+                    "stream": True,
+                    "temperature": model_config.get("temperature", 0.7),
+                    "top_p": model_config.get("top_p", 0.8)
+                }
+                
+                api_kwargs = model.convert_inputs_to_api_kwargs(
+                    input=prompt,
+                    model_kwargs=model_kwargs,
+                    model_type=ModelType.LLM
+                )
 
         # Process the response based on the provider
         try:
-            if request.provider == "ollama":
+            if request.provider == "azure":
+                # Get the response and handle it properly using the previously created api_kwargs
+                logger.info("Making Azure OpenAI API call")
+                response = await model.acall(api_kwargs=api_kwargs, model_type=ModelType.LLM)
+                
+                # The response is now the raw AsyncStream object from the OpenAI library
+                logger.info("Processing Azure OpenAI streaming response")
+                
+                try:
+                    # Iterate over the stream chunks
+                    async for chunk in response:
+                        # Log the chunk type
+                        logger.debug(f"Received chunk type: {type(chunk).__name__}")
+                        
+                        # Debug the chunk structure
+                        chunk_dict = {attr: getattr(chunk, attr) for attr in dir(chunk) if not attr.startswith('_') and not callable(getattr(chunk, attr))}
+                        logger.debug(f"Chunk attributes: {list(chunk_dict.keys())}")
+                        
+                        # Skip chunks with no delta content
+                        if not hasattr(chunk, 'choices') or not chunk.choices:
+                            logger.debug("Skipping chunk with no choices")
+                            continue
+                            
+                        # Log choices structure
+                        logger.debug(f"Choices length: {len(chunk.choices)}")
+                        
+                        # Process each choice in the chunk
+                        for i, choice in enumerate(chunk.choices):
+                            choice_dict = {attr: getattr(choice, attr) for attr in dir(choice) if not attr.startswith('_') and not callable(getattr(choice, attr))}
+                            logger.debug(f"Choice {i} attributes: {list(choice_dict.keys())}")
+                            
+                            # Extract content from delta if available
+                            if hasattr(choice, 'delta'):
+                                delta_dict = {attr: getattr(choice.delta, attr) for attr in dir(choice.delta) if not attr.startswith('_') and not callable(getattr(choice.delta, attr))}
+                                logger.debug(f"Delta attributes: {list(delta_dict.keys())}")
+                                
+                                # Get content if available
+                                if hasattr(choice.delta, 'content') and choice.delta.content is not None:
+                                    content = choice.delta.content
+                                    logger.debug(f"Sending content: {content[:20]}..." if len(content) > 20 else f"Sending content: {content}")
+                                    await websocket.send_text(content)
+                    
+                    logger.info("Azure OpenAI streaming response completed successfully")
+                except Exception as e:
+                    logger.error(f"Error processing Azure OpenAI streaming response: {str(e)}")
+                    
+                    # Try to get the response directly if streaming failed
+                    try:
+                        # If response is a completed response rather than a stream
+                        if hasattr(response, 'choices') and len(response.choices) > 0:
+                            if hasattr(response.choices[0], 'message') and hasattr(response.choices[0].message, 'content'):
+                                content = response.choices[0].message.content
+                                if content:
+                                    await websocket.send_text(content)
+                    except Exception as recovery_error:
+                        logger.error(f"Failed to recover response content: {str(recovery_error)}")
+                
+                # Explicitly close the WebSocket connection after the response is complete
+                await websocket.close()
+            elif request.provider == "ollama":
                 # Get the response and handle it properly using the previously created api_kwargs
                 response = await model.acall(api_kwargs=api_kwargs, model_type=ModelType.LLM)
                 # Handle streaming response from Ollama
@@ -603,75 +792,150 @@ This file contains...
                             model_kwargs=model_kwargs,
                             model_type=ModelType.LLM
                         )
-
+                        
                         # Get the response using the simplified prompt
                         fallback_response = await model.acall(api_kwargs=fallback_api_kwargs, model_type=ModelType.LLM)
-
-                        # Handle streaming fallback_response from Ollama
+                        
+                        # Handle streaming fallback_response
                         async for chunk in fallback_response:
                             text = getattr(chunk, 'response', None) or getattr(chunk, 'text', None) or str(chunk)
                             if text and not text.startswith('model=') and not text.startswith('created_at='):
                                 text = text.replace('<think>', '').replace('</think>', '')
                                 await websocket.send_text(text)
-                    elif request.provider == "openrouter":
+                    elif request.provider == "azure" and AZURE_OPENAI_AVAILABLE:
+                        # Initialize Azure OpenAI client for fallback
+                        logger.info("Making fallback Azure OpenAI API call")
+                        fallback_model = AzureOpenAIClient()
+                        
+                        # Format the simplified prompt as messages for Azure OpenAI
+                        fallback_messages = [
+                            {"role": "system", "content": system_prompt},
+                        ]
+                        
+                        # Add conversation history if available
+                        if conversation_history:
+                            fallback_messages.append({"role": "user", "content": f"Previous conversation: {conversation_history}"})
+                        
+                        # Add file content if available
+                        if request.filePath and file_content:
+                            fallback_messages.append({"role": "user", "content": f"File content ({request.filePath}): {file_content}"})
+                        
+                        # Add the note about answering without retrieval augmentation
+                        fallback_messages.append({"role": "user", "content": "Answering without retrieval augmentation due to input size constraints."})
+                        
+                        # Add the actual query
+                        fallback_messages.append({"role": "user", "content": query})
+                        
+                        logger.info(f"Formatted {len(fallback_messages)} fallback messages for Azure OpenAI")
+                        
+                        # For Azure OpenAI, we need to ensure the api_kwargs include both 'messages' and 'model'
+                        # The convert_inputs_to_api_kwargs method may not be handling this correctly
+                        fallback_api_kwargs = {
+                            "messages": fallback_messages,
+                            "model": request.model or "gpt-4",  # Ensure model is included
+                            "stream": True,
+                            "temperature": 0.7,
+                            "top_p": 0.8
+                        }
+                        
+                        # Log the API kwargs for debugging
+                        logger.info(f"Azure OpenAI fallback API kwargs: {fallback_api_kwargs.keys()}")
+                        
+                        # Get the response using the simplified prompt
+                        fallback_response = await fallback_model.acall(api_kwargs=fallback_api_kwargs, model_type=ModelType.LLM)
+                        
+                        # The response is now the raw AsyncStream object from the OpenAI library
+                        logger.info("Processing Azure OpenAI fallback streaming response")
+                        
                         try:
-                            # Create new api_kwargs with the simplified prompt
-                            fallback_api_kwargs = model.convert_inputs_to_api_kwargs(
-                                input=simplified_prompt,
-                                model_kwargs=model_kwargs,
-                                model_type=ModelType.LLM
-                            )
-
-                            # Get the response using the simplified prompt
-                            logger.info("Making fallback OpenRouter API call")
-                            fallback_response = await model.acall(api_kwargs=fallback_api_kwargs, model_type=ModelType.LLM)
-
-                            # Handle streaming fallback_response from OpenRouter
+                            # Iterate over the stream chunks
                             async for chunk in fallback_response:
-                                await websocket.send_text(chunk)
-                        except Exception as e_fallback:
-                            logger.error(f"Error with OpenRouter API fallback: {str(e_fallback)}")
-                            error_msg = f"\nError with OpenRouter API fallback: {str(e_fallback)}\n\nPlease check that you have set the OPENROUTER_API_KEY environment variable with a valid API key."
-                            await websocket.send_text(error_msg)
-                    elif request.provider == "openai":
+                                # Log the chunk type
+                                logger.info(f"Received fallback chunk type: {type(chunk).__name__}")
+                                
+                                # Debug the chunk structure
+                                chunk_dict = {attr: getattr(chunk, attr) for attr in dir(chunk) if not attr.startswith('_') and not callable(getattr(chunk, attr))}
+                                logger.info(f"Fallback chunk attributes: {list(chunk_dict.keys())}")
+                                
+                                # Skip chunks with no delta content
+                                if not hasattr(chunk, 'choices') or not chunk.choices:
+                                    logger.info("Skipping fallback chunk with no choices")
+                                    continue
+                                    
+                                # Log choices structure
+                                logger.info(f"Fallback choices length: {len(chunk.choices)}")
+                                
+                                # Process each choice in the chunk
+                                for i, choice in enumerate(chunk.choices):
+                                    choice_dict = {attr: getattr(choice, attr) for attr in dir(choice) if not attr.startswith('_') and not callable(getattr(choice, attr))}
+                                    logger.info(f"Fallback choice {i} attributes: {list(choice_dict.keys())}")
+                                    
+                                    # Extract content from delta if available
+                                    if hasattr(choice, 'delta'):
+                                        delta_dict = {attr: getattr(choice.delta, attr) for attr in dir(choice.delta) if not attr.startswith('_') and not callable(getattr(choice.delta, attr))}
+                                        logger.info(f"Fallback delta attributes: {list(delta_dict.keys())}")
+                                        
+                                        # Get content if available
+                                        if hasattr(choice.delta, 'content') and choice.delta.content is not None:
+                                            content = choice.delta.content
+                                            logger.info(f"Sending fallback content: {content[:20]}..." if len(content) > 20 else f"Sending fallback content: {content}")
+                                            await websocket.send_text(content)
+                            
+                            logger.info("Azure OpenAI fallback streaming response completed successfully")
+                        except Exception as e:
+                            logger.error(f"Error processing Azure OpenAI fallback streaming response: {str(e)}")
+                            
+                            # Try to get the response directly if streaming failed
+                            try:
+                                # If response is a completed response rather than a stream
+                                if hasattr(fallback_response, 'choices') and len(fallback_response.choices) > 0:
+                                    if hasattr(fallback_response.choices[0], 'message') and hasattr(fallback_response.choices[0].message, 'content'):
+                                        content = fallback_response.choices[0].message.content
+                                        if content:
+                                            await websocket.send_text(content)
+                            except Exception as recovery_error:
+                                logger.error(f"Failed to recover fallback response content: {str(recovery_error)}")
+                    elif GOOGLE_AI_AVAILABLE and google_api_key:
+                        # Initialize Google Generative AI model as fallback
+                        logger.info("Making fallback Google Generative AI call")
                         try:
-                            # Create new api_kwargs with the simplified prompt
-                            fallback_api_kwargs = model.convert_inputs_to_api_kwargs(
-                                input=simplified_prompt,
-                                model_kwargs=model_kwargs,
-                                model_type=ModelType.LLM
+                            # Get model config
+                            model_config = get_model_config(request.provider, request.model)
+                            
+                            # Create safe generation config with defaults
+                            generation_config = {
+                                "temperature": 0.7,
+                                "top_p": 0.8,
+                                "top_k": 40
+                            }
+                            
+                            # Update with available parameters if they exist
+                            if isinstance(model_config, dict):
+                                if "temperature" in model_config:
+                                    generation_config["temperature"] = model_config["temperature"]
+                                if "top_p" in model_config:
+                                    generation_config["top_p"] = model_config["top_p"]
+                            
+                            # Initialize the model with the safe configuration
+                            fallback_model = genai.GenerativeModel(
+                                model_name=model_config.get("model", "gemini-pro"),
+                                generation_config=generation_config
                             )
-
-                            # Get the response using the simplified prompt
-                            logger.info("Making fallback Openai API call")
-                            fallback_response = await model.acall(api_kwargs=fallback_api_kwargs, model_type=ModelType.LLM)
-
-                            # Handle streaming fallback_response from Openai
-                            async for chunk in fallback_response:
-                                text = chunk if isinstance(chunk, str) else getattr(chunk, 'text', str(chunk))
-                                await websocket.send_text(text)
-                        except Exception as e_fallback:
-                            logger.error(f"Error with Openai API fallback: {str(e_fallback)}")
-                            error_msg = f"\nError with Openai API fallback: {str(e_fallback)}\n\nPlease check that you have set the OPENAI_API_KEY environment variable with a valid API key."
+                            
+                            # Get streaming response using simplified prompt
+                            fallback_response = fallback_model.generate_content(simplified_prompt, stream=True)
+                            # Stream the fallback response
+                            for chunk in fallback_response:
+                                if hasattr(chunk, 'text'):
+                                    await websocket.send_text(chunk.text)
+                        except Exception as e_google:
+                            logger.error(f"Error with Google Generative AI fallback: {str(e_google)}")
+                            error_msg = f"\nAll fallback options failed. Please try again with a shorter query or check your API configurations.\nLast error: {str(e_google)}"
                             await websocket.send_text(error_msg)
                     else:
-                        # Initialize Google Generative AI model
-                        model_config = get_model_config(request.provider, request.model)
-                        fallback_model = genai.GenerativeModel(
-                            model_name=model_config["model"],
-                            generation_config={
-                                "temperature": model_config["model_kwargs"].get("temperature", 0.7),
-                                "top_p": model_config["model_kwargs"].get("top_p", 0.8),
-                                "top_k": model_config["model_kwargs"].get("top_k", 40)
-                            }
-                        )
-
-                        # Get streaming response using simplified prompt
-                        fallback_response = fallback_model.generate_content(simplified_prompt, stream=True)
-                        # Stream the fallback response
-                        for chunk in fallback_response:
-                            if hasattr(chunk, 'text'):
-                                await websocket.send_text(chunk.text)
+                        # No fallback options available
+                        error_msg = "\nNo fallback options available. Please check your API configurations and try again with a shorter query."
+                        await websocket.send_text(error_msg)
                 except Exception as e2:
                     logger.error(f"Error in fallback streaming response: {str(e2)}")
                     await websocket.send_text(f"\nI apologize, but your request is too large for me to process. Please try a shorter query or break it into smaller parts.")

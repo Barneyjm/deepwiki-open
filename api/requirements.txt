@@ -14,3 +14,4 @@ openai>=1.76.2
 ollama>=0.4.8
 aiohttp>=3.8.4
 websockets>=11.0.3
+xattr>=1.1.4
