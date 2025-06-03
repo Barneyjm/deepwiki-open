@@ -1,5 +1,5 @@
 {
-  "default_provider": "azure",
+  "default_provider": "google",
   "providers": {
     "azure": {
       "default_model": "gpt-4o",
