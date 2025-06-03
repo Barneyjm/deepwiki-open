@@ -10,6 +10,8 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 import google.generativeai as genai
 import asyncio
+from api.data_pipeline import download_repo, DatabaseManager
+from urllib.parse import unquote
 
 # Get a logger for this module
 logger = logging.getLogger(__name__)
@@ -586,7 +588,6 @@ async def catch_all_repo_route(
             repo_type = query_params.get('type', 'github')
             
             # Handle double-encoded URLs
-            from urllib.parse import unquote
             if '%25' in repo_url:  # Double-encoded
                 repo_url = unquote(unquote(repo_url))
             else:
@@ -609,7 +610,7 @@ async def catch_all_repo_route(
                 logger.warning(f"{repo_type.upper()}_TOKEN not found in environment variables")
             
             # Import the necessary modules for repository processing
-            from api.data_pipeline import download_repo, DatabaseManager
+            
             
             # Process the repository
             try:
