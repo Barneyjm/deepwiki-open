@@ -588,14 +588,6 @@ Remember:
       setStructureRequestInProgress(true);
       setLoadingMessage(messages.loading?.determiningStructure || 'Determining wiki structure...');
 
-<<<<<<< HEAD
-      // Prepare request body
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const requestBody: Record<string, any> = {
-        repo_url: repoUrlForRequest,
-        type: repoInfo.type,
-        provider: 'azure', // Default provider to ensure it's never empty
-=======
       // Get repository URL
       const repoUrl = getRepoUrl(effectiveRepoInfo);
 
@@ -604,7 +596,6 @@ Remember:
       const requestBody: Record<string, any> = {
         repo_url: repoUrl,
         type: effectiveRepoInfo.type,
->>>>>>> ca14883d9efb9334ecf06018c88115f9e24bf125
         messages: [{
           role: 'user',
 content: `Analyze this ${repoInfo.type === 'azure' ? 'Azure DevOps' : repoInfo.type === 'gitlab' ? 'GitLab' : repoInfo.type === 'bitbucket' ? 'Bitbucket' : 'GitHub'} repository ${owner}/${repo} and create a wiki structure for it.
@@ -1230,8 +1221,7 @@ IMPORTANT:
           throw err;
         }
       }
-<<<<<<< HEAD
-      else if (repoInfo.type === 'azure') {
+      else if (effectiveRepoInfo.type === 'azure') {
         // Azure DevOps repositories use a simplified approach
         try {
           // Check if we have the file tree and README in the URL query parameters
@@ -1272,10 +1262,7 @@ IMPORTANT:
           console.error('Error fetching Azure DevOps repository structure:', err);
           throw err;
         }
-      } else if (repoInfo.type === 'bitbucket') {
-=======
-      else if (effectiveRepoInfo.type === 'bitbucket') {
->>>>>>> ca14883d9efb9334ecf06018c88115f9e24bf125
+      } else if (effectiveRepoInfo.type === 'bitbucket') {
         // Bitbucket API approach
         const repoPath = extractUrlPath(effectiveRepoInfo.repoUrl ?? '') ?? `${owner}/${repo}`;
         const encodedRepoPath = encodeURIComponent(repoPath);
