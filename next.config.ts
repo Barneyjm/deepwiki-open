@@ -54,7 +54,19 @@ const nextConfig: NextConfig = {
       {
         // Azure DevOps repository path pattern
         source: '/:organization/:project/:repository',
-        destination: `${TARGET_SERVER_BASE_URL}/:organization/:project/:repository`,
+        destination: `${TARGET_SERVER_BASE_URL}/:organization/:project/:repository`
+      },
+      {
+        source: '/api/auth/status',
+        destination: `${TARGET_SERVER_BASE_URL}/auth/status`,
+      },
+      {
+        source: '/api/auth/validate',
+        destination: `${TARGET_SERVER_BASE_URL}/auth/validate`,
+      },
+      {
+        source: '/api/lang/config',
+        destination: `${TARGET_SERVER_BASE_URL}/lang/config`,
       },
     ];
   },
