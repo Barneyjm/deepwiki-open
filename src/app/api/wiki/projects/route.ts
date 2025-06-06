@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 // This should match the expected structure from your Python backend
 interface ApiProcessedProject {
@@ -35,15 +35,22 @@ const PYTHON_BACKEND_URL = process.env.PYTHON_BACKEND_HOST || 'http://localhost:
 const PROJECTS_API_ENDPOINT = `${PYTHON_BACKEND_URL}/api/processed_projects`;
 const CACHE_API_ENDPOINT = `${PYTHON_BACKEND_URL}/api/wiki_cache`;
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const authorizationHeader = request.headers.get('Authorization');
+    const backendHeaders: HeadersInit = {
+      'Content-Type': 'application/json',
+      // Add any other headers your Python backend might require, e.g., API keys
+    };
+    if (authorizationHeader) {
+      backendHeaders['Authorization'] = authorizationHeader;
+    }
+
     const response = await fetch(PROJECTS_API_ENDPOINT, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        // Add any other headers your Python backend might require, e.g., API keys
-      },
+      headers: backendHeaders,
       cache: 'no-store', // Ensure fresh data is fetched every time
+       credentials: 'include',
     });
 
     if (!response.ok) {
@@ -72,8 +79,9 @@ export async function GET() {
   }
 }
 
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
   try {
+    const authorizationHeader = request.headers.get('Authorization');
     const body: unknown = await request.json();
     if (!isDeleteProjectCachePayload(body)) {
       return NextResponse.json(
@@ -83,9 +91,18 @@ export async function DELETE(request: Request) {
     }
     const { owner, repo, repo_type, language } = body;
     const params = new URLSearchParams({ owner, repo, repo_type, language });
+
+    const backendHeaders: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    if (authorizationHeader) {
+      backendHeaders['Authorization'] = authorizationHeader;
+    }
+
     const response = await fetch(`${CACHE_API_ENDPOINT}?${params}`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: backendHeaders,
+       credentials: 'include',
     });
     if (!response.ok) {
       let errorBody = { error: response.statusText };

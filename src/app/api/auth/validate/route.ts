@@ -1,23 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const TARGET_SERVER_BASE_URL = process.env.SERVER_BASE_URL || 'http://localhost:8001';
+import { TARGET_SERVER_BASE_URL } from '@/utils/serverConfig';
 
 export async function POST(request: NextRequest) {
   try {
+    const authorizationHeader = request.headers.get('Authorization');
     const body = await request.json();
     
+    const backendHeaders: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    if (authorizationHeader) {
+      backendHeaders['Authorization'] = authorizationHeader;
+    }
+
     // Forward the request to the backend API
     const response = await fetch(`${TARGET_SERVER_BASE_URL}/auth/validate`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: backendHeaders,
       body: JSON.stringify(body),
+      credentials: 'include',
     });
     
     if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(`Backend server returned ${response.status}: ${errorBody}`);
       return NextResponse.json(
-        { error: `Backend server returned ${response.status}` },
+        { error: `Backend server returned ${response.status}`, details: errorBody },
         { status: response.status }
       );
     }

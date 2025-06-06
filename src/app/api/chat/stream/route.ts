@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { TARGET_SERVER_BASE_URL } from '@/utils/serverConfig';
 
 // The target backend server base URL, derived from environment variable or defaulted.
 // This should match the logic in your frontend's page.tsx for consistency.
-const TARGET_SERVER_BASE_URL = process.env.SERVER_BASE_URL || 'http://localhost:8001';
 
 // This is a fallback HTTP implementation that will be used if WebSockets are not available
 // or if there's an error with the WebSocket connection
 export async function POST(req: NextRequest) {
   try {
+    const authorizationHeader = req.headers.get('Authorization');
     const requestBody = await req.json(); // Assuming the frontend sends JSON
 
     // Note: This endpoint now uses the HTTP fallback instead of WebSockets
@@ -17,19 +18,26 @@ export async function POST(req: NextRequest) {
 
     const targetUrl = `${TARGET_SERVER_BASE_URL}/chat/completions/stream`;
 
+    const backendHeaders: HeadersInit = {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream', // Indicate that we expect a stream
+    };
+    if (authorizationHeader) {
+      backendHeaders['Authorization'] = authorizationHeader;
+    }
+
     // Make the actual request to the backend service
     const backendResponse = await fetch(targetUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream', // Indicate that we expect a stream
-      },
+      headers: backendHeaders,
       body: JSON.stringify(requestBody),
+       credentials: 'include',
     });
 
     // If the backend service returned an error, forward that error to the client
     if (!backendResponse.ok) {
       const errorBody = await backendResponse.text();
+       console.error(`Backend server returned ${backendResponse.status}: ${errorBody}`);
       const errorHeaders = new Headers();
       backendResponse.headers.forEach((value, key) => {
         errorHeaders.set(key, value);

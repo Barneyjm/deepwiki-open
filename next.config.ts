@@ -1,6 +1,5 @@
 import type { NextConfig } from "next";
-
-const TARGET_SERVER_BASE_URL = process.env.SERVER_BASE_URL || 'http://localhost:8001';
+import { TARGET_SERVER_BASE_URL } from './src/utils/serverConfig';
 
 const nextConfig: NextConfig = {
   /* config options here */
@@ -50,14 +49,6 @@ const nextConfig: NextConfig = {
       {
         source: '/local_repo/structure',
         destination: `${TARGET_SERVER_BASE_URL}/local_repo/structure`,
-      },
-      {
-        source: '/api/auth/status',
-        destination: `${TARGET_SERVER_BASE_URL}/auth/status`,
-      },
-      {
-        source: '/api/auth/validate',
-        destination: `${TARGET_SERVER_BASE_URL}/auth/validate`,
       },
       {
         source: '/api/lang/config',
