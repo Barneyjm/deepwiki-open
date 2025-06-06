@@ -143,6 +143,17 @@ def load_generator_config():
 # Load embedder configuration
 def load_embedder_config():
     embedder_config = load_json_config("embedder.json")
+    
+    # Debug logging to see what's loaded
+    logger.info(f"Loaded embedder config: {embedder_config}")
+    if "retriever" in embedder_config:
+        logger.info(f"Retriever config found: {embedder_config['retriever']}")
+        if "top_k" in embedder_config["retriever"]:
+            logger.info(f"top_k value found: {embedder_config['retriever']['top_k']}")
+        else:
+            logger.warning("top_k not found in retriever config")
+    else:
+        logger.warning("retriever key not found in embedder config")
 
     # Process client classes
     for key in ["embedder", "embedder_ollama"]:
@@ -245,6 +256,12 @@ if embedder_config:
     for key in ["embedder", "embedder_ollama", "retriever", "text_splitter"]:
         if key in embedder_config:
             configs[key] = embedder_config[key]
+
+# Ensure retriever configuration has a top_k value
+if "retriever" not in configs:
+    configs["retriever"] = {}
+if "top_k" not in configs.get("retriever", {}):
+    configs["retriever"]["top_k"] = 20  # Default value
 
 # Update repository configuration
 if repo_config:

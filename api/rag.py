@@ -420,8 +420,23 @@ IMPORTANT FORMATTING RULES:
         try:
             # Use the appropriate embedder for retrieval
             retrieve_embedder = self.query_embedder if self.is_ollama_embedder else self.embedder
+            
+            # Debug logging for configs
+            logger.info(f"Available configs keys: {list(configs.keys())}")
+            if "retriever" in configs:
+                logger.info(f"Retriever config: {configs['retriever']}")
+                if "top_k" in configs["retriever"]:
+                    logger.info(f"Found top_k in configs: {configs['retriever']['top_k']}")
+                else:
+                    logger.warning("top_k not found in retriever config")
+            else:
+                logger.warning("retriever key not found in configs")
+                
+            # Get top_k from configs or use a default value
+            top_k = configs.get("retriever", {}).get("top_k", 20)
+            logger.info(f"Using top_k value: {top_k}")
+            
             self.retriever = FAISSRetriever(
-                **configs["retriever"],
                 embedder=retrieve_embedder,
                 documents=self.transformed_docs,
                 document_map_func=lambda doc: doc.vector,
