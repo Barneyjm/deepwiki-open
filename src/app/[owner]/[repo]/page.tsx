@@ -408,6 +408,7 @@ Based ONLY on the content of the \`[RELEVANT_SOURCE_FILES]\`:
 IMPORTANT: Generate the content in ${language === 'en' ? 'English' :
             language === 'ja' ? 'Japanese (日本語)' :
             language === 'zh' ? 'Mandarin Chinese (中文)' :
+            language === 'zh-tw' ? 'Traditional Chinese (繁體中文)' :
             language === 'es' ? 'Spanish (Español)' :
             language === 'kr' ? 'Korean (한국어)' :
             language === 'vi' ? 'Vietnamese (Tiếng Việt)' : 'English'} language.
@@ -643,6 +644,7 @@ I want to create a wiki for this repository. Determine the most logical structur
 IMPORTANT: The wiki content will be generated in ${language === 'en' ? 'English' :
             language === 'ja' ? 'Japanese (日本語)' :
             language === 'zh' ? 'Mandarin Chinese (中文)' :
+            language === 'zh-tw' ? 'Traditional Chinese (繁體中文)' :
             language === 'es' ? 'Spanish (Español)' :
             language === 'kr' ? 'Korean (한国語)' :
             language === 'vi' ? 'Vietnamese (Tiếng Việt)' : 'English'} language.
@@ -1602,13 +1604,10 @@ IMPORTANT:
             if (cachedData && cachedData.wiki_structure && cachedData.generated_pages && Object.keys(cachedData.generated_pages).length > 0) {
               console.log('Using server-cached wiki data');
 
-              // Update repoInfo with cached repo_url if not provided in URL
-              let updatedRepoInfo = effectiveRepoInfo;
-              if (cachedData.repo_url && !effectiveRepoInfo.repoUrl) {
-                updatedRepoInfo = { ...effectiveRepoInfo, repoUrl: cachedData.repo_url };
-                setEffectiveRepoInfo(updatedRepoInfo); // Update effective repo info state
-                console.log('Using cached repo_url:', cachedData.repo_url);
-              }
+              setSelectedModelState(cachedData.model);
+              setSelectedProviderState(cachedData.provider);
+              // Update repoInfo 
+              setEffectiveRepoInfo(cachedData.repo); 
 
               // Ensure the cached structure has sections and rootSections
               const cachedStructure = {
@@ -1783,16 +1782,14 @@ IMPORTANT:
               sections: wikiStructure.sections || [],
               rootSections: wikiStructure.rootSections || []
             };
-
             const dataToCache = {
-              owner: effectiveRepoInfo.owner,
-              repo: effectiveRepoInfo.repo,
-              repo_type: effectiveRepoInfo.type,
+              repo: effectiveRepoInfo,
               language: language,
               comprehensive: isComprehensiveView,
               wiki_structure: structureToCache,
               generated_pages: generatedPages,
-              repo_url: effectiveRepoInfo.repoUrl || repoUrl || undefined // Include repo_url in cache
+              provider: selectedProviderState,
+              model: selectedModelState
             };
             const response = await fetch(`/api/wiki_cache`, {
               method: 'POST',

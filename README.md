@@ -14,7 +14,7 @@
 [![Twitter/X](https://img.shields.io/badge/Twitter-1DA1F2?style=for-the-badge&logo=twitter&logoColor=white)](https://x.com/sashimikun_void)
 [![Discord](https://img.shields.io/badge/Discord-7289DA?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/VQMBGR8u5v)
 
-[English](./README.md) | [简体中文](./README.zh.md) | [日本語](./README.ja.md) | [Español](./README.es.md) | [한국어](./README.kr.md) | [Tiếng Việt](./README.vi.md)
+[English](./README.md) | [简体中文](./README.zh.md) | [繁體中文](./README.zh-tw.md) | [日本語](./README.ja.md) | [Español](./README.es.md) | [한국어](./README.kr.md) | [Tiếng Việt](./README.vi.md) | [Português Brasileiro](./README.pt-br.md)
 
 ## ✨ Features
 
@@ -324,6 +324,8 @@ If `DEEPWIKI_AUTH_MODE` is not set or is set to `false` (or any other value than
 
 You can use Docker to run DeepWiki:
 
+#### Running the Container
+
 ```bash
 # Pull the image from GitHub Container Registry
 docker pull ghcr.io/asyncfuncai/deepwiki-open:latest
@@ -398,6 +400,22 @@ docker run -p 8001:8001 -p 3000:3000 \
   -e OPENROUTER_API_KEY=your_openrouter_api_key \
   -e OLLAMA_HOST=your_ollama_host \
   deepwiki-open
+```
+
+#### Using Self-Signed Certificates in Docker
+
+If you're in an environment that uses self-signed certificates, you can include them in the Docker build:
+
+1. Create a directory for your certificates (default is `certs` in your project root)
+2. Copy your `.crt` or `.pem` certificate files into this directory
+3. Build the Docker image:
+
+```bash
+# Build with default certificates directory (certs)
+docker build .
+
+# Or build with a custom certificates directory
+docker build --build-arg CUSTOM_CERT_DIR=my-custom-certs .
 ```
 
 ### API Server Details

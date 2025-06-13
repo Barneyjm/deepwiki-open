@@ -457,7 +457,7 @@ def prepare_data_pipeline(is_ollama_embedder: bool = None):
     splitter = TextSplitter(**configs["text_splitter"])
     embedder_config = get_embedder_config()
 
-    embedder = get_embedder(is_local_ollama=is_ollama_embedder)
+    embedder = get_embedder()
 
     if is_ollama_embedder:
         # Use Ollama document processor for single-document processing
@@ -795,12 +795,27 @@ class DatabaseManager:
         self.repo_url_or_path = None
         self.repo_paths = None
 
-    def _create_repo(self, repo_url_or_path: str, type: str = "github", access_token: str = None) -> None:
+    def _extract_repo_name_from_url(self, repo_url_or_path: str, repo_type: str) -> str:
+        # Extract owner and repo name to create unique identifier
+        url_parts = repo_url_or_path.rstrip('/').split('/')
+
+        if repo_type in ["github", "gitlab", "bitbucket"] and len(url_parts) >= 5:
+            # GitHub URL format: https://github.com/owner/repo
+            # GitLab URL format: https://gitlab.com/owner/repo or https://gitlab.com/group/subgroup/repo
+            # Bitbucket URL format: https://bitbucket.org/owner/repo
+            owner = url_parts[-2]
+            repo = url_parts[-1].replace(".git", "")
+            repo_name = f"{owner}_{repo}"
+        else:
+            repo_name = url_parts[-1].replace(".git", "")
+        return repo_name
+
+    def _create_repo(self, repo_url_or_path: str, repo_type: str = "github", access_token: str = None) -> None:
         """
         Download and prepare all paths.
         Paths:
-        ~/.adalflow/repos/{repo_name} (for url, local path will be the same)
-        ~/.adalflow/databases/{repo_name}.pkl
+        ~/.adalflow/repos/{owner}_{repo_name} (for url, local path will be the same)
+        ~/.adalflow/databases/{owner}_{repo_name}.pkl
 
         Args:
             repo_url_or_path (str): The URL or local path of the repository

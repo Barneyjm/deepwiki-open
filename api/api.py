@@ -13,17 +13,12 @@ import asyncio
 from api.data_pipeline import download_repo, DatabaseManager
 from urllib.parse import unquote
 
-# Get a logger for this module
+# Configure logging
+from api.logging_config import setup_logging
+
+setup_logging()
 logger = logging.getLogger(__name__)
 
-# Get API keys from environment variables
-google_api_key = os.environ.get('GOOGLE_API_KEY')
-
-# Configure Google Generative AI
-if google_api_key:
-    genai.configure(api_key=google_api_key)
-else:
-    logger.warning("GOOGLE_API_KEY not found in environment variables")
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -80,6 +75,15 @@ class ProcessedProjectEntry(BaseModel):
     submittedAt: int # Timestamp
     language: str # Extracted from filename
 
+class RepoInfo(BaseModel):
+    owner: str
+    repo: str
+    type: str
+    token: Optional[str] = None
+    localPath: Optional[str] = None
+    repoUrl: Optional[str] = None
+
+
 class WikiStructureModel(BaseModel):
     """
     Model for the overall wiki structure.
@@ -95,19 +99,20 @@ class WikiCacheData(BaseModel):
     """
     wiki_structure: WikiStructureModel
     generated_pages: Dict[str, WikiPage]
-    repo_url: Optional[str] = None  # Add repo_url to cache
+    repo: RepoInfo
+    provider: str
+    model: str
 
 class WikiCacheRequest(BaseModel):
     """
     Model for the request body when saving wiki cache.
     """
-    owner: str
-    repo: str
-    repo_type: str
+    repo: RepoInfo
     language: str
     wiki_structure: WikiStructureModel
     generated_pages: Dict[str, WikiPage]
-    repo_url: Optional[str] = None  # Add repo_url to cache request
+    provider: str
+    model: str
 
 class WikiExportRequest(BaseModel):
     """
@@ -425,13 +430,15 @@ async def read_wiki_cache(owner: str, repo: str, repo_type: str, language: str) 
 
 async def save_wiki_cache(data: WikiCacheRequest) -> bool:
     """Saves wiki cache data to the file system."""
-    cache_path = get_wiki_cache_path(data.owner, data.repo, data.repo_type, data.language)
+    cache_path = get_wiki_cache_path(data.repo.owner, data.repo.repo, data.repo.type, data.language)
     logger.info(f"Attempting to save wiki cache. Path: {cache_path}")
     try:
         payload = WikiCacheData(
             wiki_structure=data.wiki_structure,
             generated_pages=data.generated_pages,
-            repo_url=data.repo_url
+            repo=data.repo,
+            provider=data.provider,
+            model=data.model
         )
         # Log size of data to be cached for debugging (avoid logging full content if large)
         try:
@@ -492,7 +499,7 @@ async def store_wiki_cache(request_data: WikiCacheRequest):
     if not supported_langs.__contains__(request_data.language):
         request_data.language = configs["lang_config"]["default"]
 
-    logger.info(f"Attempting to save wiki cache for {request_data.owner}/{request_data.repo} ({request_data.repo_type}), lang: {request_data.language}")
+    logger.info(f"Attempting to save wiki cache for {request_data.repo.owner}/{request_data.repo.repo} ({request_data.repo.type}), lang: {request_data.language}")
     success = await save_wiki_cache(request_data)
     if success:
         return {"message": "Wiki cache saved successfully"}
@@ -546,29 +553,29 @@ async def health_check():
 
 @app.get("/")
 async def root():
-    """Root endpoint to check if the API is running"""
+    """Root endpoint to check if the API is running and list available endpoints dynamically."""
+    # Collect routes dynamically from the FastAPI app
+    endpoints = {}
+    for route in app.routes:
+        if hasattr(route, "methods") and hasattr(route, "path"):
+            # Skip docs and static routes
+            if route.path in ["/openapi.json", "/docs", "/redoc", "/favicon.ico"]:
+                continue
+            # Group endpoints by first path segment
+            path_parts = route.path.strip("/").split("/")
+            group = path_parts[0].capitalize() if path_parts[0] else "Root"
+            method_list = list(route.methods - {"HEAD", "OPTIONS"})
+            for method in method_list:
+                endpoints.setdefault(group, []).append(f"{method} {route.path}")
+
+    # Optionally, sort endpoints for readability
+    for group in endpoints:
+        endpoints[group].sort()
+
     return {
         "message": "Welcome to Streaming API",
         "version": "1.0.0",
-        "endpoints": {
-            "Chat": [
-                "POST /chat/completions/stream - Streaming chat completion (HTTP)",
-                "WebSocket /ws/chat - WebSocket chat completion",
-            ],
-            "Wiki": [
-                "POST /export/wiki - Export wiki content as Markdown or JSON",
-                "GET /api/wiki_cache - Retrieve cached wiki data",
-                "POST /api/wiki_cache - Store wiki data to cache",
-                "GET /auth/status - Check if wiki authentication is enabled",
-                "POST /auth/validate - Check if wiki authentication is valid"
-            ],
-            "LocalRepo": [
-                "GET /local_repo/structure - Get structure of a local repository (with path parameter)",
-            ],
-            "Health": [
-                "GET /health - Health check endpoint"
-            ]
-        }
+        "endpoints": endpoints
     }
 
 # --- Simplified Route for Azure DevOps Repositories ---
